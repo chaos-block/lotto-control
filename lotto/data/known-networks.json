@@ -1,0 +1,10 @@
+{
+  "networks": [
+    { "ssid": "Home-5G",         "psk": "SuperSecret2025!", "priority": 90 },
+    { "ssid": "CafeFree",        "psk": "coffee123",        "priority": 80 },
+    { "ssid": "NeighborOpen",    "psk": "",                 "priority": 10, "key_mgmt": "NONE" },
+    { "ssid": "PhoneHotspot",    "psk": "backup9876",       "priority": 70 },
+    { "ssid": "LibraryWiFi",     "psk": "public1234",       "priority": 60 }
+    // … add 100+ networks, the miner will roam to the highest-priority one available
+  ]
+}
