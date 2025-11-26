@@ -1,8 +1,5 @@
 #!/bin/bash
-# create-minimal-tailscale-perfect.sh – 25 Nov 2025 (mount & download fixed)
 # Does ONLY one thing: joins Tailscale instantly with your reusable key
-# Everything else = your job later over SSH
-# Uses only built-in tools – no pv, no extra packages
 set -euo pipefail
 
 if [[ $# -ne 2 ]] || [[ "$2" != tskey-k* ]]; then
@@ -98,9 +95,6 @@ rm -f "$IMG"
 
 echo ""
 echo "===================================================================="
-echo "GOLDEN IMAGE PERFECTLY CREATED – MOUNT & DOWNLOAD 100% FIXED"
-echo "   • Auto-unmounts ANY existing mount (e.g., /media/user/PXE_SDSC or /run/media/*)"
-echo "   • Verified download URL (raspberrypi.org – 2025-11-24 latest)"
 echo "   • Only installs Tailscale + joins your tailnet"
 echo "   • SSH enabled (pi/raspberry until you lock it down)"
 echo "===================================================================="
