@@ -49,7 +49,7 @@ echo "   $IMG_SHA"
 
 # Confirm before write
 echo ""
-read -p "⚠️  Ready to write?  Confirm device is correct [y/N]: " -n1 confirm
+read -p "⚠️  Ready to write?  Confirm device is correct [y/N]: " -n1 confirm 
 echo ""
 [[ "$confirm" != "y" ]] && { echo "Aborted."; exit 5; }
 
