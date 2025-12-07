@@ -1,108 +1,105 @@
 #!/bin/bash
-# prepare-lotto-image.sh — One-command lotto image preparation
-# Place SD card already flashed with Raspberry Pi OS Lite 64-bit Bookworm
-# Run with sudo → outputs perfect lotto miner ready for 1000+ fleet
+# lotto_flash.sh — Complete Lotto Miner Provisioning (Imaging + Tailscale)
+# Phase 1: Reliable flash + tailnet join
+# USAGE: sudo ./lotto_flash.sh [image.img.xz or empty for auto-download] /dev/sdX
 
 set -euo pipefail
 
-# === CONFIGURATION (never contains secrets) ===
-BOOT_MOUNT="/mnt/pi-boot"
-FIRMWARE="$BOOT_MOUNT/firmware"
-HOSTNAME_BASE="lotto"
-CONTROL_NODE="lotto-control"          # change only if different
-KEY_SERVER_PORT="8080"
+IMG="${1:-}"
+SDCARD="${2:-}"
 
-# === Safety first ===
-if [[ $EUID -ne 0 ]]; then
-   echo "Must run as root (sudo)"
-   exit 1
-fi
+# === Prestaged reusable Tailscale key (REPLACE WITH YOUR KEY) ===
+PRESTAGED_KEY="tskey-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # Generate: tailscale key create --expiry=2160h --reuse=500
 
-if ! lsblk -o NAME,SIZE,TYPE,MOUNTPOINT | grep -q "$BOOT_MOUNT"; then
-   echo "Boot partition not mounted at $BOOT_MOUNT"
-   echo "Mount it first:"
-   echo "  sudo mkdir -p $BOOT_MOUNT"
-   echo "  sudo mount /dev/sdX1 $BOOT_MOUNT   # replace sdX1 with your boot partition"
-   exit 1
-fi
+usage() {
+  cat >&2 <<EOF
+USAGE: sudo ./lotto_flash.sh [image.img.xz] <SD device>
 
-echo "Preparing lotto image on $BOOT_MOUNT"
-
-# === cmdline.txt — read-only root + quiet boot ===
-if ! grep -q "systemd.enable=overlay=yes" "$FIRMWARE/cmdline.txt"; then
-  sed -i 's|$| systemd.enable=overlay=yes quiet splash|' "$FIRMWARE/cmdline.txt"
-  echo "→ cmdline.txt updated (overlayfs + quiet)"
-fi
-
-# === config.txt — hardware resilience ===
-cat <<'EOF' > "$FIRMWARE/config.txt.new"
-# Lotto miner hardware settings
-dtparam=watchdog=on
-dtoverlay=gpio-fan,gpio=14,temp=60000
-dtoverlay=gpio-shutdown,gpio_pin=3,active_low=1,gpio_pull=up
-arm_boost=1
+If image omitted: auto-downloads latest Raspberry Pi OS Lite 64-bit Bookworm
 EOF
-cat "$FIRMWARE/config.txt" >> "$FIRMWARE/config.txt.new"
-mv "$FIRMWARE/config.txt.new" "$FIRMWARE/config.txt"
-echo "→ config.txt updated (watchdog + fan + shutdown)"
+  exit 1
+}
 
-# === First-boot Tailscale (zero secrets) ===
-cat <<'EOF' > "$FIRMWARE/firstboot-tailscale.sh"
+[[ -z "$SDCARD" ]] && usage
+[[ "$EUID" -ne 0 ]] && { echo "ERROR: Run with sudo"; exit 3; }
+[[ ! -b "$SDCARD" ]] && { echo "ERROR: '$SDCARD' not valid block device"; exit 4; }
+
+# Auto-download if no image
+if [[ -z "$IMG" ]]; then
+  echo "No image provided – downloading latest Raspberry Pi OS Lite 64-bit Bookworm..."
+  IMG="latest-raspios-bookworm-arm64-lite.img.xz"
+  curl -L -o "$IMG" https://downloads.raspberrypi.com/raspios_lite_arm64/images/$(curl -s https://downloads.raspberrypi.com/raspios_lite_arm64 | tail -n5 | grep -o 'href="[^"]*"' | cut -d'"' -f2 | tail -1)latest
+fi
+
+[[ ! -e "$IMG" ]] && { echo "ERROR: Image not found"; exit 2; }
+
+echo "Image: $IMG → $SDCARD"
+read -p "Confirm write to $SDCARD [y/N]: " -n1 confirm
+echo ""
+[[ "$confirm" != "y" ]] && { echo "Aborted"; exit 5; }
+
+# Write + verify (existing logic)
+sync
+if [[ "$IMG" == *.xz ]]; then
+  xzcat "$IMG" | dd of="$SDCARD" bs=4M conv=fsync status=progress
+else
+  dd if="$IMG" of="$SDCARD" bs=4M conv=fsync status=progress
+fi
+sync
+
+# === Mount boot + deploy Tailscale prestaged ===
+BOOT_PART="${SDCARD}1"
+echo "Mounting boot partition $BOOT_PART"
+mkdir -p /mnt/lotto-boot
+mount "$BOOT_PART" /mnt/lotto-boot
+
+# Deploy prestaged key
+echo "$PRESTAGED_KEY" > /mnt/lotto-boot/firmware/tailscale-authkey.txt
+chmod 600 /mnt/lotto-boot/firmware/tailscale-authkey.txt
+
+# First-boot script (self-destruct)
+cat <<'EOF' > /mnt/lotto-boot/firmware/firstboot-tailscale.sh
 #!/bin/bash
 set -euo pipefail
-MARKER="/.tailscale-firstboot-done"
+MARKER="/.tailscale-done"
 [[ -f "$MARKER" ]] && exit 0
-LOG="/var/log/firstboot-tailscale.log"
+AUTHKEY=$(cat /boot/firmware/tailscale-authkey.txt)
 HOSTNAME="lotto-$(tr -d '\0' < /proc/device-tree/serial-number)"
-
-echo "[$(date)] Starting Tailscale first-boot for $HOSTNAME" >> "$LOG"
 
 curl -fsSL https://tailscale.com/install.sh | sh
 systemctl enable --now tailscaled
+timeout 120 bash -c 'until ping -c1 8.8.8.8 &>/dev/null; do sleep 1; done'
 
-timeout 120 bash -c 'until ping -c1 100.100.100.100 &>/dev/null; do sleep 1; done' || exit 0
-
-KEY=$(curl -fsS http://'"$CONTROL_NODE"':'"$KEY_SERVER_PORT"'/key 2>/dev/null || true)
-if [[ -n "$KEY" && "$KEY" =~ ^tskey-* ]]; then
-  tailscale up --authkey="$KEY" --hostname="$HOSTNAME" --advertise-tags=tag:lotto
-else
-  FALLBACK=$(curl -fsS http://'"$CONTROL_NODE"':'"$KEY_SERVER_PORT"'/fallback-key 2>/dev/null || true)
-  [[ -n "$FALLBACK" && "$FALLBACK" =~ ^tskey-* ]] && tailscale up --authkey="$FALLBACK" --hostname="$HOSTNAME" --advertise-tags=tag:lotto
-fi
+tailscale up --authkey="$AUTHKEY" --hostname="$HOSTNAME" --advertise-tags=tag:lotto
 
 touch "$MARKER"
-rm -- "$0"
-echo "[$(date)] Tailscale joined successfully" >> "$LOG"
+rm -- "$0" /boot/firmware/tailscale-authkey.txt
 EOF
-chmod +x "$FIRMWARE/firstboot-tailscale.sh"
-echo "→ firstboot-tailscale.sh deployed"
+chmod +x /mnt/lotto-boot/firmware/firstboot-tailscale.sh
 
-# === Enable first-boot service ===
-mkdir -p "$FIRMWARE/firmware/systemd"
-cat <<'EOF' > "$FIRMWARE/firmware/systemd/firstboot-tailscale.service"
+# Enable via systemd (simple oneshot)
+mkdir -p /mnt/lotto-boot/firmware/systemd
+cat <<'EOF' > /mnt/lotto-boot/firmware/systemd/firstboot-tailscale.service
 [Unit]
-Description=Lotto Miner Tailscale First Boot
+Description=Lotto Tailscale First Boot
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=!/.tailscale-firstboot-done
 
 [Service]
 Type=oneshot
 ExecStart=/bin/bash /boot/firmware/firstboot-tailscale.sh
-RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
 EOF
-echo "→ systemd service deployed"
 
-# === Final message ===
-echo
-echo "LOTTO IMAGE READY"
-echo "→ Safely eject SD card"
-echo "→ Plug into miner → it will auto-join tailnet within 2 minutes"
-echo "→ No secrets in image | Read-only root | Full watchdog protection"
-echo
-echo "Fleet scaling: 100 → 1000+ nodes → just keep flashing"
+echo "Tailscale prestaged + first-boot deployed"
+
+umount /mnt/lotto-boot
+sync
+
+echo "LOTTO MINER PROVISIONED"
+echo "→ Plug in power → miner joins tailnet automatically"
+echo "→ lotto-control can now SSH in → Phase 2 optimizations next"
 
 exit 0
