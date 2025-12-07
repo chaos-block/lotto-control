@@ -45,9 +45,17 @@ sync
 
 # === Mount boot + deploy Tailscale prestaged ===
 BOOT_PART="${SDCARD}1"
-echo "Mounting boot partition $BOOT_PART"
-mkdir -p /mnt/lotto-boot
-mount "$BOOT_PART" /mnt/lotto-boot
+MOUNT_POINT="/mnt/lotto-boot"
+
+echo "Ensuring boot partition $BOOT_PART is mounted at $MOUNT_POINT"
+mkdir -p "$MOUNT_POINT"
+
+if ! grep -q "$MOUNT_POINT" /proc/mounts; then
+  mount "$BOOT_PART" "$MOUNT_POINT"
+  echo "→ Mounted $BOOT_PART"
+else
+  echo "→ Already mounted – proceeding"
+fi
 
 # First-boot script (self-destruct)
 cat <<EOF > /mnt/lotto-boot/firmware/firstboot-tailscale.sh
@@ -88,7 +96,12 @@ EOF
 
 echo "Tailscale prestaged + first-boot deployed"
 
-umount /mnt/lotto-boot
+if grep -q "$MOUNT_POINT" /proc/mounts; then
+  umount "$MOUNT_POINT"
+  echo "→ Unmounted $MOUNT_POINT"
+else
+  echo "→ Not mounted – skipping unmount"
+fi
 sync
 
 echo "LOTTO MINER PROVISIONED"
