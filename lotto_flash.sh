@@ -58,24 +58,25 @@ else
 fi
 
 # First-boot script (self-destruct)
-cat <<EOF > /mnt/lotto-boot/firmware/firstboot-tailscale.sh
-#!/bin/bash
-set -euo pipefail
-MARKER="/.tailscale-done"
-[[ -f "$MARKER" ]] && exit 0
-AUTHKEY="${PRESTAGED_KEY:-}"
-[[ -z "$AUTHKEY" ]] && { echo "[$(date)] No prestaged key available" >> /var/log/firstboot-tailscale.log; exit 1; }
-HOSTNAME="lotto-$(tr -d '\0' < /proc/device-tree/serial-number)"
+cat <<EOF > /mnt/lotto-boot/firmware/firstboot-tailscale.sh  
+#!/bin/bash  
+set -euo pipefail  
+MARKER="/.tailscale-done"  
+[[ -f "\$MARKER" ]] && exit 0  
+AUTHKEY="${PRESTAGED_KEY:-}"  
+[[ -z "\$AUTHKEY" ]] && { echo "[$(date)] No prestaged key available" >> /var/log/firstboot-tailscale.log; exit 1; }  
+HOSTNAME="lotto-\$(tr -d '\0' < /proc/device-tree/serial-number)"  
 
-curl -fsSL https://tailscale.com/install.sh | sh
-systemctl enable --now tailscaled
-timeout 120 bash -c 'until ping -c1 8.8.8.8 &>/dev/null; do sleep 1; done'
+curl -fsSL https://tailscale.com/install.sh | sh  
+systemctl enable --now tailscaled  
+timeout 120 bash -c 'until ping -c1 8.8.8.8 &>/dev/null; do sleep 1; done'  
 
-tailscale up --authkey="$AUTHKEY" --hostname="$HOSTNAME" --advertise-tags=tag:lotto
+tailscale up --authkey="\$AUTHKEY" --hostname="\$HOSTNAME" --advertise-tags=tag:lotto  
 
-touch "$MARKER"
-rm -- "$0"
-EOF
+touch "\$MARKER"  
+rm -- "\$0"  
+EOF  
+
 chmod +x /mnt/lotto-boot/firmware/firstboot-tailscale.sh
 
 # Enable via systemd (simple oneshot)
