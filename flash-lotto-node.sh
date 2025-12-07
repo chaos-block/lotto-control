@@ -16,4 +16,4 @@ if [[ -z "$SCRIPT" ]]; then
 fi
 
 echo "✓ Downloaded.  Running..."
-echo "$SCRIPT" | sudo bash -s "$@"
+echo "$$ SCRIPT" | sudo bash -s " $$@"
