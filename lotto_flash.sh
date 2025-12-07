@@ -35,7 +35,7 @@ fi
 
 echo "Image: $IMG → $SDCARD"
 read -p "Confirm write to $SDCARD [y/N]: " -n1 confirm
-echo ""
+ echo ""
 [[ "$confirm" != "y" ]] && { echo "Aborted"; exit 5; }
 
 # Write + verify (existing logic)
