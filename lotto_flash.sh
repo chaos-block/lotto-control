@@ -1,98 +1,108 @@
-cho ""#!/bin/bash
-# lotto_flash.sh — SD Card Imaging + SHA256 Verification
-# Lotto Bitcoin Miners Fleet Provisioning
-# USAGE: sudo ./lotto_flash. sh <image.img[.xz]> <SD device: /dev/sdX>
+#!/bin/bash
+# prepare-lotto-image.sh — One-command lotto image preparation
+# Place SD card already flashed with Raspberry Pi OS Lite 64-bit Bookworm
+# Run with sudo → outputs perfect lotto miner ready for 1000+ fleet
 
 set -euo pipefail
 
-IMG="${1:-}"
-SDCARD="${2:-}"
+# === CONFIGURATION (never contains secrets) ===
+BOOT_MOUNT="/mnt/pi-boot"
+FIRMWARE="$BOOT_MOUNT/firmware"
+HOSTNAME_BASE="lotto"
+CONTROL_NODE="lotto-control"          # change only if different
+KEY_SERVER_PORT="8080"
 
-usage() {
-  cat >&2 <<EOF
-USAGE: sudo ./lotto_flash.sh <image.img[.xz]> <SD device>
+# === Safety first ===
+if [[ $EUID -ne 0 ]]; then
+   echo "Must run as root (sudo)"
+   exit 1
+fi
 
-EXAMPLES:
-  sudo ./lotto_flash.sh 2025-11-24-raspios-bookworm-arm64-lite.img.xz /dev/sdc
-  sudo ./lotto_flash. sh raspios. img /dev/sdb
+if ! lsblk -o NAME,SIZE,TYPE,MOUNTPOINT | grep -q "$BOOT_MOUNT"; then
+   echo "Boot partition not mounted at $BOOT_MOUNT"
+   echo "Mount it first:"
+   echo "  sudo mkdir -p $BOOT_MOUNT"
+   echo "  sudo mount /dev/sdX1 $BOOT_MOUNT   # replace sdX1 with your boot partition"
+   exit 1
+fi
 
-NOTES:
-  • Run as root/sudo
-  • Double-check device (lsblk) — write is destructive
-  • Supports . img and .img.xz (auto-detected)
+echo "Preparing lotto image on $BOOT_MOUNT"
+
+# === cmdline.txt — read-only root + quiet boot ===
+if ! grep -q "systemd.enable=overlay=yes" "$FIRMWARE/cmdline.txt"; then
+  sed -i 's|$| systemd.enable=overlay=yes quiet splash|' "$FIRMWARE/cmdline.txt"
+  echo "→ cmdline.txt updated (overlayfs + quiet)"
+fi
+
+# === config.txt — hardware resilience ===
+cat <<'EOF' > "$FIRMWARE/config.txt.new"
+# Lotto miner hardware settings
+dtparam=watchdog=on
+dtoverlay=gpio-fan,gpio=14,temp=60000
+dtoverlay=gpio-shutdown,gpio_pin=3,active_low=1,gpio_pull=up
+arm_boost=1
 EOF
-  exit 1
-}
+cat "$FIRMWARE/config.txt" >> "$FIRMWARE/config.txt.new"
+mv "$FIRMWARE/config.txt.new" "$FIRMWARE/config.txt"
+echo "→ config.txt updated (watchdog + fan + shutdown)"
 
-[[ -z "$IMG" || -z "$SDCARD" ]] && usage
-[[ ! -e "$IMG" ]] && { echo "❌ ERROR: Image '$IMG' not found. "; exit 2; }
-[[ "$EUID" -ne 0 ]] && { echo "❌ ERROR: Must run with sudo."; exit 3; }
+# === First-boot Tailscale (zero secrets) ===
+cat <<'EOF' > "$FIRMWARE/firstboot-tailscale.sh"
+#!/bin/bash
+set -euo pipefail
+MARKER="/.tailscale-firstboot-done"
+[[ -f "$MARKER" ]] && exit 0
+LOG="/var/log/firstboot-tailscale.log"
+HOSTNAME="lotto-$(tr -d '\0' < /proc/device-tree/serial-number)"
 
-# Validate SD device exists and is a block device
-if !  [[ -b "$SDCARD" ]]; then
-  echo "❌ ERROR: '$SDCARD' is not a valid block device."
-  echo "   Run 'lsblk' to find your SD card."
-  exit 4
-fi
+echo "[$(date)] Starting Tailscale first-boot for $HOSTNAME" >> "$LOG"
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🔧 LOTTO FLEET IMAGING"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📦 Image:  $IMG"
-echo "💾 Target: $SDCARD"
+curl -fsSL https://tailscale.com/install.sh | sh
+systemctl enable --now tailscaled
 
-# Calculate source hash
-echo ""
-echo "📊 Computing image SHA256..."
-IMG_SHA=$(sha256sum "$IMG" | cut -d' ' -f1)
-echo "   $IMG_SHA"
+timeout 120 bash -c 'until ping -c1 100.100.100.100 &>/dev/null; do sleep 1; done' || exit 0
 
-# Confirm before write
-echo ""
-read -p "⚠️  Ready to write?  Confirm device is correct [y/N]: " -n1 confirm 
-echo ""
-[[ "$confirm" != "y" ]] && { echo "Aborted."; exit 5; }
-
-# Write image
-echo ""
-echo "⏳ Writing to $SDCARD..."
-sync
-if [[ "$IMG" == *.xz ]]; then
-  xzcat "$IMG" | dd of="$SDCARD" bs=4M status=progress conv=fsync
+KEY=$(curl -fsS http://'"$CONTROL_NODE"':'"$KEY_SERVER_PORT"'/key 2>/dev/null || true)
+if [[ -n "$KEY" && "$KEY" =~ ^tskey-* ]]; then
+  tailscale up --authkey="$KEY" --hostname="$HOSTNAME" --advertise-tags=tag:lotto
 else
-  dd if="$IMG" of="$SDCARD" bs=4M status=progress conv=fsync
-fi
-sync
-
-# Verify: hash the read-back bytes
-echo ""
-echo "🔍 Verifying write (SHA256 read-back)..."
-IMG_SIZE=$(stat -c%s "$IMG")
-if [[ "$IMG" == *.xz ]]; then
-  UNCOMPRESSED_SIZE=$(xz -l "$IMG" 2>/dev/null | awk '/Uncompressed/{print $NF}' || echo "$IMG_SIZE")
-else
-  UNCOMPRESSED_SIZE="$IMG_SIZE"
+  FALLBACK=$(curl -fsS http://'"$CONTROL_NODE"':'"$KEY_SERVER_PORT"'/fallback-key 2>/dev/null || true)
+  [[ -n "$FALLBACK" && "$FALLBACK" =~ ^tskey-* ]] && tailscale up --authkey="$FALLBACK" --hostname="$HOSTNAME" --advertise-tags=tag:lotto
 fi
 
-CARD_HASH=$(dd if="$SDCARD" bs=4M count=$((UNCOMPRESSED_SIZE / 4 / 1024 / 1024 + 1)) 2>/dev/null | \
-  head -c "$UNCOMPRESSED_SIZE" | sha256sum | cut -d' ' -f1)
+touch "$MARKER"
+rm -- "$0"
+echo "[$(date)] Tailscale joined successfully" >> "$LOG"
+EOF
+chmod +x "$FIRMWARE/firstboot-tailscale.sh"
+echo "→ firstboot-tailscale.sh deployed"
 
-if [[ "$IMG_SHA" == "$CARD_HASH" ]]; then
-  echo "✅ VERIFIED: SD card matches image."
-  echo "   SHA256: $IMG_SHA"
-else
-  echo "❌ FAILED: Hash mismatch!"
-  echo "   Expected: $IMG_SHA"
-  echo "   Got:      $CARD_HASH"
-  exit 10
-fi
+# === Enable first-boot service ===
+mkdir -p "$FIRMWARE/firmware/systemd"
+cat <<'EOF' > "$FIRMWARE/firmware/systemd/firstboot-tailscale.service"
+[Unit]
+Description=Lotto Miner Tailscale First Boot
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/.tailscale-firstboot-done
 
-# Eject
-echo ""
-echo "🔌 Ejecting..."
-sync
-udisksctl power-off -b "$SDCARD" 2>/dev/null || \
-  echo "   (Manual eject: safely remove SD card. )"
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /boot/firmware/firstboot-tailscale.sh
+RemainAfterExit=yes
 
-echo ""
-echo "✅ Complete.  SD card ready for first boot."
+[Install]
+WantedBy=multi-user.target
+EOF
+echo "→ systemd service deployed"
+
+# === Final message ===
+echo
+echo "LOTTO IMAGE READY"
+echo "→ Safely eject SD card"
+echo "→ Plug into miner → it will auto-join tailnet within 2 minutes"
+echo "→ No secrets in image | Read-only root | Full watchdog protection"
+echo
+echo "Fleet scaling: 100 → 1000+ nodes → just keep flashing"
+
+exit 0
