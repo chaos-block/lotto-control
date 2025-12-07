@@ -7,6 +7,14 @@ REPO_NAME="lotto-control-drafts"
 BRANCH="main"
 SCRIPT_URL="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/$BRANCH/lotto_flash.sh"
 
+# === Prestaged reusable Tailscale key (REPLACE WITH YOUR REAL KEY) ===
+PRESTAGED_KEY="tskey-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # Generate on lotto-control: tailscale key create --expiry=2160h --reuse=500
+
+if [[ "$PRESTAGED_KEY" == "tskey-xxxx"* || -z "$PRESTAGED_KEY" ]]; then
+  echo "ERROR: Replace PRESTAGED_KEY in flash-lotto-node.sh with your real reusable Tailscale auth key"
+  exit 1
+fi
+
 echo "🔗 Fetching lotto_flash.sh from $REPO_OWNER/$REPO_NAME..."
 SCRIPT=$(curl -fsSL "$SCRIPT_URL")
 
@@ -15,8 +23,9 @@ if [[ -z "$SCRIPT" ]]; then
   exit 1
 fi
 
-# Aggressive clean: strip markdown + all \r
+# Clean fetched script: strip markdown + CRLF
 CLEAN_SCRIPT=$(echo "$SCRIPT" | sed '/^```/d; s/\r$//g')
 
-echo "Downloaded and cleaned. Running..."
-echo "$CLEAN_SCRIPT" | sudo bash -s "$@"
+# Embed PRESTAGED_KEY and run (pass as env var)
+echo "Downloaded, cleaned, and key embedded. Running..."
+PRESTAGED_KEY="$PRESTAGED_KEY" echo "$CLEAN_SCRIPT" | sudo bash -s "$@"
