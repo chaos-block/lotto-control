@@ -66,6 +66,10 @@ echo "→ Created firmware directories"
 touch "$MOUNT_POINT/firmware/ssh"
 echo "→ SSH enabled on first boot"
 
+# Skip first-boot user wizard – pre-create 'pi' user with password 'raspberry'
+echo "pi:\$6\$abc123def456\$/abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890" > "$MOUNT_POINT/firmware/userconf.txt"
+echo "→ Pre-created 'pi' user (password: raspberry) – wizard skipped"
+
 # First-boot script (self-destruct)
 cat <<EOF > /mnt/lotto-boot/firmware/firstboot-tailscale.sh  
 #!/bin/bash  
