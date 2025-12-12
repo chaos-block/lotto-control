@@ -71,39 +71,28 @@ echo "$(echo 'raspberry' | openssl passwd -5 -stdin)" | sed 's/^/pi:/' > "$MOUNT
 echo "→ Pre-created 'pi' user (password: raspberry) – wizard skipped"
 
 # First-boot script (self-destruct)
-cat <<EOF > /mnt/lotto-boot/firmware/firstboot-tailscale.sh  
-#!/bin/bash  
-set -euo pipefail  
-MARKER="/.tailscale-done"  
-[[ -f "\$MARKER" ]] && exit 0  
-AUTHKEY="${PRESTAGED_KEY:-}"  
-[[ -z "\$AUTHKEY" ]] && { echo "[$(date)] No prestaged key available" >> /var/log/firstboot-tailscale.log; exit 1; }  
-HOSTNAME="lotto-\$(tr -d '\0' < /proc/device-tree/serial-number)"  
+# First-boot Tailscale script (runs automatically on first boot)
+mkdir -p "$MOUNT_POINT/firmware/first-boot"
+cat <<EOF > "$MOUNT_POINT/firmware/first-boot/firstboot-tailscale.sh"
+#!/bin/bash
+set -euo pipefail
+MARKER="/.tailscale-done"
+[[ -f "\$MARKER" ]] && exit 0
+AUTHKEY="${PRESTAGED_KEY:-}"
+[[ -z "\$$ AUTHKEY" ]] && { echo "[ $$(date)] No prestaged key" >> /var/log/firstboot-tailscale.log; exit 1; }
+HOSTNAME="lotto-\$(tr -d '\0' < /proc/device-tree/serial-number)"
 
-curl -fsSL https://tailscale.com/install.sh | sh  
-systemctl enable --now tailscaled  
-timeout 120 bash -c 'until ping -c1 8.8.8.8 &>/dev/null; do sleep 1; done'  
+curl -fsSL https://tailscale.com/install.sh | sh
+systemctl enable --now tailscaled
+timeout 120 bash -c 'until ping -c1 8.8.8.8 &>/dev/null; do sleep 1; done'
 
-tailscale up --authkey="\$AUTHKEY" --hostname="\$HOSTNAME" --advertise-tags=tag:lotto  
+tailscale up --authkey="\$AUTHKEY" --hostname="\$HOSTNAME" --advertise-tags=tag:lotto
 
-touch "\$MARKER"  
-rm -- "\$0"  
-EOF  
-
-chmod +x /mnt/lotto-boot/firmware/firstboot-tailscale.sh
-
-# Enable Tailscale first-boot service (the missing piece)
-ln -sf /boot/firmware/systemd/firstboot-tailscale.service /etc/systemd/system/firstboot-tailscale.service
-ln -sf /etc/systemd/system/firstboot-tailscale.service /etc/systemd/system/multi-user.target.wants/firstboot-tailscale.service
-echo "→ Tailscale first-boot service enabled"
-
-# Enable via systemd (simple oneshot)
-mkdir -p /mnt/lotto-boot/firmware/systemd
-cat <<'EOF' > /mnt/lotto-boot/firmware/systemd/firstboot-tailscale.service
-[Unit]
-Description=Lotto Tailscale First Boot
-After=network-online.target
-Wants=network-online.target
+touch "\$MARKER"
+rm -- "\$0"
+EOF
+chmod +x "$MOUNT_POINT/firmware/first-boot/firstboot-tailscale.sh"
+echo "→ First-boot Tailscale script deployed (runs automatically)"
 
 [Service]
 Type=oneshot
