@@ -92,6 +92,11 @@ EOF
 
 chmod +x /mnt/lotto-boot/firmware/firstboot-tailscale.sh
 
+# Enable Tailscale first-boot service (the missing piece)
+ln -sf /boot/firmware/systemd/firstboot-tailscale.service /etc/systemd/system/firstboot-tailscale.service
+ln -sf /etc/systemd/system/firstboot-tailscale.service /etc/systemd/system/multi-user.target.wants/firstboot-tailscale.service
+echo "→ Tailscale first-boot service enabled"
+
 # Enable via systemd (simple oneshot)
 mkdir -p /mnt/lotto-boot/firmware/systemd
 cat <<'EOF' > /mnt/lotto-boot/firmware/systemd/firstboot-tailscale.service
