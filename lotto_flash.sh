@@ -79,7 +79,7 @@ set -euo pipefail
 MARKER="/.tailscale-done"
 [[ -f "\$MARKER" ]] && exit 0
 AUTHKEY="${PRESTAGED_KEY:-}"
-[[ -z "\$$ AUTHKEY" ]] && { echo "[ $$(date)] No prestaged key" >> /var/log/firstboot-tailscale.log; exit 1; }
+[[ -z "$$ AUTHKEY" ]] && { echo "[ $$(date)] No prestaged key" >> /var/log/firstboot-tailscale.log; exit 1; }
 HOSTNAME="lotto-\$(tr -d '\0' < /proc/device-tree/serial-number)"
 
 curl -fsSL https://tailscale.com/install.sh | sh
