@@ -57,11 +57,6 @@ else
   echo "→ Already mounted – proceeding"
 fi
 
-# Ensure firmware directories exist on boot partition
-mkdir -p "$MOUNT_POINT/firmware"
-mkdir -p "$MOUNT_POINT/firmware/systemd"
-echo "→ Created firmware directories"
-
 # Enable SSH on first boot
 touch "$MOUNT_POINT/ssh"
 echo "→ SSH enabled on first boot"
@@ -72,8 +67,8 @@ echo "→ Pre-created 'pi' user (password: raspberry) – wizard skipped"
 
 # First-boot script (self-destruct)
 # First-boot Tailscale script (runs automatically on first boot)
-mkdir -p "$MOUNT_POINT/firmware/first-boot"
-cat <<EOF > "$MOUNT_POINT/firstboot-tailscale.sh"
+mkdir -p "$MOUNT_POINT/first-boot"
+cat <<EOF > "$MOUNT_POINT/first-boot/firstboot-tailscale.sh"
 #!/bin/bash
 set -euo pipefail
 MARKER="/.tailscale-done"
@@ -91,7 +86,7 @@ tailscale up --authkey="\$AUTHKEY" --hostname="\$HOSTNAME" --advertise-tags=tag:
 touch "\$MARKER"
 rm -- "\$0"
 EOF
-chmod +x "$MOUNT_POINT/firstboot-tailscale.sh"
+chmod +x "$MOUNT_POINT/first-boot/firstboot-tailscale.sh"
 echo "→ First-boot Tailscale script deployed"
 
 [Service]
