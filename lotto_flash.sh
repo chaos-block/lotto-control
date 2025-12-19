@@ -86,12 +86,19 @@ tailscale up --authkey="\$AUTHKEY" --hostname="\$HOSTNAME" --advertise-tags=tag:
 touch "\$MARKER"
 rm -- "\$0"
 EOF
+
 chmod +x "$MOUNT_POINT/first-boot/firstboot-tailscale.sh"
 echo "→ First-boot Tailscale script deployed"
 
+cat << 'EOF' > $BOOT/etc/systemd/system/lotto-firstboot.service
+[Unit]
+Description=Lotto First-Boot Tailscale Setup
+After=network.target
+
 [Service]
 Type=oneshot
-ExecStart=/bin/bash /boot/firmware/firstboot-tailscale.sh
+ExecStart=/usr/local/bin/firstboot-tailscale.sh
+RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
